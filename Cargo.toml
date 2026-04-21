@@ -3,6 +3,9 @@ name = "rustop"
 version = "0.1.0"
 edition = "2024"
 
+# NOTE: This project uses cargo-make for task running.
+# Install it globally: cargo install cargo-make
+
 [dependencies]
 ratatui = "0.30"
 sysinfo = "0.38"
@@ -11,6 +14,3 @@ crossterm = "0.29"
 [profile.release]
 lto = true
 codegen-units = 1
-
-[dev-dependencies]
-cargo-make = "0.37.24"

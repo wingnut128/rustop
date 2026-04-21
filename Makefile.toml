@@ -1,5 +1,5 @@
 [config]
-skip_git_info = true
+skip_git_env_info = true
 
 [tasks.build]
 command = "cargo"
