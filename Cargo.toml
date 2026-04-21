@@ -1,0 +1,16 @@
+[package]
+name = "rustop"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+ratatui = "0.30"
+sysinfo = "0.38"
+crossterm = "0.28"
+
+[profile.release]
+lto = true
+codegen-units = 1
+
+[dev-dependencies]
+cargo-make = "0.37.24"

@@ -1,0 +1,47 @@
+[config]
+skip_git_info = true
+
+[tasks.build]
+command = "cargo"
+args = ["build", "--release"]
+description = "Build the project in release mode"
+
+[tasks.build-debug]
+command = "cargo"
+args = ["build"]
+description = "Build the project in debug mode"
+
+[tasks.run]
+command = "cargo"
+args = ["run"]
+description = "Run the project"
+
+[tasks.lint]
+command = "cargo"
+args = ["clippy", "--all-targets", "--", "-D", "warnings"]
+description = "Run clippy with strict warnings"
+
+[tasks.fmt]
+command = "cargo"
+args = ["fmt", "--all"]
+description = "Format code with rustfmt"
+
+[tasks.format]
+command = "cargo"
+args = ["fmt", "--all", "--check"]
+description = "Check code formatting"
+
+[tasks.test]
+command = "cargo"
+args = ["test", "--all"]
+description = "Run all tests"
+
+[tasks.check]
+command = "cargo"
+args = ["check", "--all-targets"]
+description = "Check code without building"
+
+[tasks.doc]
+command = "cargo"
+args = ["doc", "--no-deps"]
+description = "Generate documentation"
