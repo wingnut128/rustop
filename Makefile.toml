@@ -45,3 +45,8 @@ description = "Check code without building"
 command = "cargo"
 args = ["doc", "--no-deps"]
 description = "Generate documentation"
+
+[tasks.install]
+command = "cargo"
+args = ["install", "--path", ".", "--force"]
+description = "Install the binary to ~/.cargo/bin"
