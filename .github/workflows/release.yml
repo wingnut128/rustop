@@ -31,6 +31,11 @@ jobs:
           - target: aarch64-apple-darwin
             os: macos-14
     steps:
+      - name: Harden the runner (Audit all outbound calls)
+        uses: step-security/harden-runner@8d3c67de8e2fe68ef647c8db1e6a09f647780f40 # v2.19.0
+        with:
+          egress-policy: audit
+
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           ref: ${{ inputs.tag || github.ref }}
@@ -77,12 +82,17 @@ jobs:
     needs: build
     runs-on: ubuntu-24.04
     steps:
+      - name: Harden the runner (Audit all outbound calls)
+        uses: step-security/harden-runner@8d3c67de8e2fe68ef647c8db1e6a09f647780f40 # v2.19.0
+        with:
+          egress-policy: audit
+
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           path: dist
           merge-multiple: true
 
-      - uses: softprops/action-gh-release@b4309332981a82ec1c5618f44dd2e27cc8bfbfda # v3.0.0
+      - uses: step-security/action-gh-release@dc29ef0d1f6f9a032a97ec797d9cb7ea788dde41 # v2.6.1
         with:
           tag_name: ${{ inputs.tag || github.ref_name }}
           files: |

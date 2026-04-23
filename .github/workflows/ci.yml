@@ -14,11 +14,19 @@ env:
   CARGO_TERM_COLOR: always
   RUSTFLAGS: -D warnings
 
+permissions:
+  contents: read
+
 jobs:
   fmt:
     name: rustfmt
     runs-on: ubuntu-24.04
     steps:
+      - name: Harden the runner (Audit all outbound calls)
+        uses: step-security/harden-runner@8d3c67de8e2fe68ef647c8db1e6a09f647780f40 # v2.19.0
+        with:
+          egress-policy: audit
+
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
       - name: Install Rust stable
         run: |
@@ -31,6 +39,11 @@ jobs:
     name: clippy
     runs-on: ubuntu-24.04
     steps:
+      - name: Harden the runner (Audit all outbound calls)
+        uses: step-security/harden-runner@8d3c67de8e2fe68ef647c8db1e6a09f647780f40 # v2.19.0
+        with:
+          egress-policy: audit
+
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
       - name: Install Rust stable
         run: |
@@ -48,6 +61,11 @@ jobs:
       matrix:
         os: [ubuntu-24.04, ubuntu-24.04-arm, macos-14]
     steps:
+      - name: Harden the runner (Audit all outbound calls)
+        uses: step-security/harden-runner@8d3c67de8e2fe68ef647c8db1e6a09f647780f40 # v2.19.0
+        with:
+          egress-policy: audit
+
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
       - name: Install Rust stable
         run: |
