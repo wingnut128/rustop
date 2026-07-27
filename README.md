@@ -37,13 +37,13 @@ shasum -a 256 -c rustop-vX.Y.Z-<target>.tar.gz.sha256
 
 ### From source
 
-Requires Rust 1.88+ (2024 edition) and [cargo-make](https://crates.io/crates/cargo-make).
+Requires Rust 1.88+ (2024 edition) and [just](https://crates.io/crates/just).
 
 ```sh
-cargo install cargo-make
+cargo install just
 git clone https://github.com/wingnut128/rustop
 cd rustop
-cargo make build
+just build
 ./target/release/rustop
 ```
 
@@ -71,11 +71,11 @@ Pressing the same sort key twice flips the sort direction.
 ## Development
 
 ```sh
-cargo make run      # run in dev
-cargo make test     # run tests
-cargo make lint     # clippy with -D warnings
-cargo make fmt      # rustfmt
-cargo make check    # cargo check
+just run      # run in dev
+just test     # run tests
+just lint     # clippy with -D warnings
+just fmt      # rustfmt
+just check    # cargo check
 ```
 
 ## License

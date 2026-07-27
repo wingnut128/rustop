@@ -5,18 +5,18 @@ HTOP-like process viewer built in Rust using ratatui and sysinfo.
 ## Runtime & Tooling
 - **Rust**: 2024 edition (requires 1.88+)
 - **Package manager**: cargo
-- **Build**: `cargo make build` (release) or `cargo make build-debug` (debug)
-- **Lint**: `cargo make lint` (clippy with -D warnings)
-- **Format**: `cargo make fmt` (rustfmt)
-- **Run**: `cargo make run`
+- **Build**: `just build` (release) or `just build-debug` (debug)
+- **Lint**: `just lint` (clippy with -D warnings)
+- **Format**: `just fmt` (rustfmt)
+- **Run**: `just run`
 
 ## Commands
-- **Build**: `cargo make build`
-- **Run in dev**: `cargo make run`
-- **Lint**: `cargo make lint`
-- **Format**: `cargo make fmt`
-- **Test**: `cargo make test`
-- **Check**: `cargo make check`
+- **Build**: `just build`
+- **Run in dev**: `just run`
+- **Lint**: `just lint`
+- **Format**: `just fmt`
+- **Test**: `just test`
+- **Check**: `just check`
 
 ## Controls
 - `1` = Sort by CPU
