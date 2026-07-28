@@ -8,7 +8,7 @@ edition = "2024"
 
 [dependencies]
 ratatui = "0.30"
-sysinfo = "0.38"
+sysinfo = "0.39"
 crossterm = "0.29"
 
 [profile.release]
