@@ -92,7 +92,7 @@ jobs:
           path: dist
           merge-multiple: true
 
-      - uses: step-security/action-gh-release@dc29ef0d1f6f9a032a97ec797d9cb7ea788dde41 # v2.6.1
+      - uses: step-security/action-gh-release@d2093dbdaf0c6507874908247e14bbc4dee6a72d # v3.0.1
         with:
           tag_name: ${{ inputs.tag || github.ref_name }}
           files: |
