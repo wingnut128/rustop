@@ -56,12 +56,19 @@ impl SystemStats {
     }
 }
 
-/// Strip control characters from a string to prevent terminal injection.
-/// Preserves tabs and newlines as they are benign in a TUI context.
+/// Replace characters that can alter terminal layout or visual reading order.
 pub fn sanitize(s: &str) -> String {
     s.chars()
         .map(|c| {
-            if c.is_control() && c != '\n' && c != '\t' {
+            if c.is_control()
+                || matches!(
+                    c,
+                    '\u{200B}'..='\u{200F}'
+                        | '\u{202A}'..='\u{202E}'
+                        | '\u{2060}'..='\u{206F}'
+                        | '\u{FEFF}'
+                )
+            {
                 '\u{FFFD}'
             } else {
                 c
@@ -80,6 +87,9 @@ pub struct App {
     pub expanded_cmd: Option<u32>,
     pub scroll_offset: usize,
     pub visible_rows: usize,
+    pub filter: String,
+    pub filtering: bool,
+    pub paused: bool,
 }
 
 impl App {
@@ -96,6 +106,9 @@ impl App {
             expanded_cmd: None,
             scroll_offset: 0,
             visible_rows: 20,
+            filter: String::new(),
+            filtering: false,
+            paused: false,
         }
     }
 
@@ -118,7 +131,7 @@ impl App {
                 let cmd: Vec<String> = process
                     .cmd()
                     .iter()
-                    .map(|s| sanitize(&s.to_string_lossy()))
+                    .map(|s| s.to_string_lossy().into_owned())
                     .collect();
                 let name = sanitize(&process.name().to_string_lossy());
                 let name_lower = name.to_lowercase();
@@ -150,7 +163,7 @@ impl App {
         }
 
         // Clamp scroll_offset so it never points past the list
-        self.clamp_scroll_offset();
+        self.clamp_selection_and_scroll();
     }
 
     fn sort_processes(&mut self) {
@@ -165,11 +178,33 @@ impl App {
         });
     }
 
-    fn clamp_scroll_offset(&mut self) {
-        if self.processes.is_empty() {
+    pub fn filtered_processes(&self) -> impl Iterator<Item = &ProcessInfo> {
+        let filter = self.filter.to_lowercase();
+        self.processes
+            .iter()
+            .filter(move |process| filter.is_empty() || process.name_lower.contains(&filter))
+    }
+
+    pub fn filtered_count(&self) -> usize {
+        self.filtered_processes().count()
+    }
+
+    fn clamp_selection_and_scroll(&mut self) {
+        let filtered_pids: Vec<u32> = self
+            .filtered_processes()
+            .map(|process| process.pid)
+            .collect();
+        if filtered_pids.is_empty() {
             self.scroll_offset = 0;
+            self.selected_pid = None;
         } else {
-            let max_offset = self.processes.len().saturating_sub(1);
+            if self
+                .selected_pid
+                .is_some_and(|pid| !filtered_pids.contains(&pid))
+            {
+                self.selected_pid = None;
+            }
+            let max_offset = filtered_pids.len().saturating_sub(1);
             self.scroll_offset = self.scroll_offset.min(max_offset);
         }
     }
@@ -181,25 +216,67 @@ impl App {
             self.sort_key = key;
             self.sort_asc = key.default_ascending();
         }
+        self.clamp_selection_and_scroll();
     }
 
     pub fn move_selection(&mut self, delta: isize) {
-        if self.processes.is_empty() {
+        let filtered_pids: Vec<u32> = self
+            .filtered_processes()
+            .map(|process| process.pid)
+            .collect();
+        if filtered_pids.is_empty() {
             return;
         }
 
-        let max_idx = self.processes.len() - 1;
+        let max_idx = filtered_pids.len() - 1;
 
         let current_idx = self
             .selected_pid
-            .and_then(|pid| self.processes.iter().position(|p| p.pid == pid));
+            .and_then(|pid| filtered_pids.iter().position(|&candidate| candidate == pid));
 
         let new_idx = match current_idx {
             Some(idx) => (idx as isize + delta).clamp(0, max_idx as isize) as usize,
             // First movement just selects the first visible item
             None => self.scroll_offset.min(max_idx),
         };
-        self.selected_pid = Some(self.processes[new_idx].pid);
+        self.select_filtered_index(new_idx, &filtered_pids);
+    }
+
+    pub fn move_to_edge(&mut self, last: bool) {
+        let filtered_pids: Vec<u32> = self
+            .filtered_processes()
+            .map(|process| process.pid)
+            .collect();
+        if !filtered_pids.is_empty() {
+            let index = if last { filtered_pids.len() - 1 } else { 0 };
+            self.select_filtered_index(index, &filtered_pids);
+        }
+    }
+
+    pub fn move_to_match(&mut self, forward: bool) {
+        let filtered_pids: Vec<u32> = self
+            .filtered_processes()
+            .map(|process| process.pid)
+            .collect();
+        if filtered_pids.is_empty() {
+            return;
+        }
+        let index = self
+            .selected_pid
+            .and_then(|pid| filtered_pids.iter().position(|&candidate| candidate == pid))
+            .map(|index| {
+                if forward {
+                    (index + 1) % filtered_pids.len()
+                } else {
+                    (index + filtered_pids.len() - 1) % filtered_pids.len()
+                }
+            })
+            .unwrap_or(0);
+        self.select_filtered_index(index, &filtered_pids);
+    }
+
+    fn select_filtered_index(&mut self, new_idx: usize, filtered_pids: &[u32]) {
+        self.selected_pid = Some(filtered_pids[new_idx]);
 
         // Adjust scroll to keep selection visible
         if new_idx < self.scroll_offset {
@@ -215,6 +292,34 @@ impl App {
         } else {
             self.expanded_cmd = self.selected_pid;
         }
+    }
+
+    pub fn begin_filter(&mut self) {
+        self.filtering = true;
+    }
+
+    pub fn end_filter(&mut self) {
+        self.filtering = false;
+    }
+
+    pub fn push_filter_char(&mut self, character: char) {
+        self.filter.push(character);
+        self.clamp_selection_and_scroll();
+    }
+
+    pub fn pop_filter_char(&mut self) {
+        self.filter.pop();
+        self.clamp_selection_and_scroll();
+    }
+
+    pub fn clear_filter(&mut self) {
+        self.filter.clear();
+        self.filtering = false;
+        self.clamp_selection_and_scroll();
+    }
+
+    pub fn toggle_pause(&mut self) {
+        self.paused = !self.paused;
     }
 }
 
@@ -244,6 +349,9 @@ mod tests {
             expanded_cmd: None,
             scroll_offset: 0,
             visible_rows: 5,
+            filter: String::new(),
+            filtering: false,
+            paused: false,
         }
     }
 
@@ -260,9 +368,10 @@ mod tests {
     }
 
     #[test]
-    fn sanitize_preserves_tabs_and_newlines() {
-        assert_eq!(sanitize("tab\there"), "tab\there");
-        assert_eq!(sanitize("newline\nhere"), "newline\nhere");
+    fn sanitize_replaces_layout_and_direction_controls() {
+        assert_eq!(sanitize("tab\there"), "tab\u{FFFD}here");
+        assert_eq!(sanitize("newline\nhere"), "newline\u{FFFD}here");
+        assert_eq!(sanitize("abc\u{202E}def\u{200B}"), "abc\u{FFFD}def\u{FFFD}");
     }
 
     #[test]
@@ -454,14 +563,14 @@ mod tests {
         assert_eq!(app.expanded_cmd, Some(42));
     }
 
-    // ── clamp_scroll_offset ───────────────────────────────────
+    // ── filtering and scroll clamping ─────────────────────────
 
     #[test]
     fn clamp_scroll_offset_resets_on_empty() {
         let mut app = make_app_with(vec![]);
         app.scroll_offset = 50;
 
-        app.clamp_scroll_offset();
+        app.clamp_selection_and_scroll();
         assert_eq!(app.scroll_offset, 0);
     }
 
@@ -471,7 +580,7 @@ mod tests {
         let mut app = make_app_with(procs);
         app.scroll_offset = 50;
 
-        app.clamp_scroll_offset();
+        app.clamp_selection_and_scroll();
         assert_eq!(app.scroll_offset, 0);
     }
 
@@ -483,8 +592,66 @@ mod tests {
         let mut app = make_app_with(procs);
         app.scroll_offset = 5;
 
-        app.clamp_scroll_offset();
+        app.clamp_selection_and_scroll();
         assert_eq!(app.scroll_offset, 5);
+    }
+
+    #[test]
+    fn filter_is_case_insensitive_and_clears_invalid_selection() {
+        let mut app = make_app_with(vec![
+            make_process(1, "Alpha", 1.0, 1.0),
+            make_process(2, "beta", 1.0, 1.0),
+        ]);
+        app.selected_pid = Some(2);
+        app.push_filter_char('A');
+        app.push_filter_char('L');
+
+        let pids: Vec<u32> = app
+            .filtered_processes()
+            .map(|process| process.pid)
+            .collect();
+        assert_eq!(pids, vec![1]);
+        assert_eq!(app.selected_pid, None);
+    }
+
+    #[test]
+    fn match_navigation_wraps_in_both_directions() {
+        let mut app = make_app_with(vec![
+            make_process(1, "alpha", 1.0, 1.0),
+            make_process(2, "alpine", 1.0, 1.0),
+        ]);
+        app.filter = "al".to_string();
+        app.selected_pid = Some(2);
+
+        app.move_to_match(true);
+        assert_eq!(app.selected_pid, Some(1));
+        app.move_to_match(false);
+        assert_eq!(app.selected_pid, Some(2));
+    }
+
+    #[test]
+    fn edge_navigation_selects_first_and_last_filtered_process() {
+        let mut app = make_app_with(vec![
+            make_process(1, "alpha", 1.0, 1.0),
+            make_process(2, "beta", 1.0, 1.0),
+            make_process(3, "alpine", 1.0, 1.0),
+        ]);
+        app.filter = "al".to_string();
+
+        app.move_to_edge(true);
+        assert_eq!(app.selected_pid, Some(3));
+        app.move_to_edge(false);
+        assert_eq!(app.selected_pid, Some(1));
+    }
+
+    #[test]
+    fn pause_state_toggles() {
+        let mut app = make_app_with(vec![]);
+        assert!(!app.paused);
+        app.toggle_pause();
+        assert!(app.paused);
+        app.toggle_pause();
+        assert!(!app.paused);
     }
 
     // ── sort_processes ────────────────────────────────────────

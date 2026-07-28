@@ -6,7 +6,7 @@ use ratatui::{
     widgets::{Block, Borders, Paragraph, Row, Table, Wrap},
 };
 
-use crate::app::{App, SortKey};
+use crate::app::{App, SortKey, sanitize};
 
 /// Column widths used by the process table, defined once to avoid duplication.
 const COLUMN_WIDTHS: [Constraint; 4] = [
@@ -246,28 +246,20 @@ pub fn render_process_table(f: &mut Frame, app: &App, area: Rect) {
     .style(Style::default().fg(Color::Cyan).bold());
 
     let rows: Vec<Row> = app
-        .processes
-        .iter()
+        .filtered_processes()
         .skip(app.scroll_offset)
         .take(visible_rows)
         .map(|p| {
             let is_selected = app.selected_pid == Some(p.pid);
-            let is_expanded = app.expanded_cmd == Some(p.pid);
             let style = if is_selected {
                 Style::default().bg(Color::Blue).fg(Color::White)
             } else {
                 Style::default()
             };
 
-            let name = if is_expanded && !p.cmd.is_empty() {
-                p.cmd.join(" ")
-            } else {
-                p.name.clone()
-            };
-
             Row::new([
                 p.pid.to_string(),
-                name,
+                p.name.clone(),
                 format!("{:.1}", p.cpu),
                 format!("{:.1}", p.mem_mib),
             ])
@@ -275,9 +267,15 @@ pub fn render_process_table(f: &mut Frame, app: &App, area: Rect) {
         })
         .collect();
 
-    let table = Table::new(rows, COLUMN_WIDTHS)
-        .header(header)
-        .block(Block::default().title("Processes").borders(Borders::ALL));
+    let table = Table::new(rows, COLUMN_WIDTHS).header(header).block(
+        Block::default()
+            .title(format!(
+                "Processes ({}/{})",
+                app.filtered_count(),
+                app.processes.len()
+            ))
+            .borders(Borders::ALL),
+    );
 
     f.render_widget(table, area);
 }
@@ -286,7 +284,12 @@ pub fn render_command_panel(f: &mut Frame, app: &App, area: Rect) {
     let (title, cmd_lines) = match app.expanded_cmd {
         Some(pid) => match app.processes.iter().find(|p| p.pid == pid) {
             Some(process) if !process.cmd.is_empty() => {
-                let cmd_str = process.cmd.join(" ");
+                let cmd_str = process
+                    .cmd
+                    .iter()
+                    .map(|argument| sanitize(argument))
+                    .collect::<Vec<_>>()
+                    .join(" ");
                 let lines: Vec<Line> = cmd_str
                     .lines()
                     .map(|line| Line::from(Span::raw(line.to_string())))
@@ -305,7 +308,15 @@ pub fn render_command_panel(f: &mut Frame, app: &App, area: Rect) {
     f.render_widget(panel, area);
 }
 
-pub fn render_help(f: &mut Frame, area: Rect) {
+pub fn render_help(f: &mut Frame, app: &App, area: Rect) {
+    let filter_status = if app.filtering {
+        format!("Filter: /{}█", app.filter)
+    } else if app.filter.is_empty() {
+        "Filter: /".to_string()
+    } else {
+        format!("Filter: /{}", app.filter)
+    };
+    let pause_status = if app.paused { "PAUSED" } else { "Live" };
     let help_text = vec![
         Line::from(vec![
             Span::raw("Sort: "),
@@ -328,6 +339,20 @@ pub fn render_help(f: &mut Frame, area: Rect) {
             Span::raw("=Expand/Collapse "),
             Span::styled("q", Style::default().fg(Color::Yellow)),
             Span::raw("=Quit"),
+        ]),
+        Line::from(vec![
+            Span::styled("g/G Home/End PgUp/PgDn", Style::default().fg(Color::Yellow)),
+            Span::raw("=Navigate | "),
+            Span::styled("/", Style::default().fg(Color::Yellow)),
+            Span::raw("=Filter | "),
+            Span::styled("n/N", Style::default().fg(Color::Yellow)),
+            Span::raw("=Match"),
+        ]),
+        Line::from(vec![
+            Span::styled(filter_status, Style::default().fg(Color::Yellow)),
+            Span::raw(" | "),
+            Span::styled("Space", Style::default().fg(Color::Yellow)),
+            Span::raw(format!("={pause_status}")),
         ]),
     ];
 
