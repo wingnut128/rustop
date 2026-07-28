@@ -1,0 +1,29 @@
+[workspace]
+# This is a binary-first project, not a crates.io release.
+# Use git tags to determine released versions and skip cargo publish.
+git_only = true
+publish = false
+# Create the tag and GitHub Release when the Release PR merges.
+git_release_enable = true
+git_tag_enable = true
+changelog_update = true
+# Create the release as a draft so the release workflow can attach
+# platform binaries before it goes public.
+git_release_draft = true
+
+[[package]]
+name = "rustop"
+# Bump version based on conventional commits alone. cargo-semver-checks
+# (release-plz default) only bumps on public-API changes, which a TUI
+# binary with no library surface never triggers — releases would never
+# get cut. Disabling the check lets `feat:`/`fix:` commits drive the bump.
+semver_check = false
+
+[changelog]
+header = """# Changelog
+
+All notable changes to this project will be documented in this file.
+
+The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
+and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+"""
