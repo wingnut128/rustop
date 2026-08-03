@@ -10,7 +10,7 @@ edition = "2024"
 ratatui = "0.30"
 sysinfo = "0.39"
 crossterm = "0.29"
-signal-hook = "0.3"
+signal-hook = "0.4"
 
 [profile.release]
 lto = true
