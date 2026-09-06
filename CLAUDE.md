@@ -1,6 +1,6 @@
 # CLAUDE.md
 
-HTOP-like process viewer built in Rust using ratatui and sysinfo.
+Btop-inspired system and process dashboard built in Rust using ratatui and sysinfo.
 
 ## Runtime & Tooling
 - **Rust**: 2024 edition (requires 1.88+)
@@ -24,5 +24,8 @@ HTOP-like process viewer built in Rust using ratatui and sysinfo.
 - `3` = Sort by PID
 - `4` = Sort by Name
 - `↑/↓` or `j/k` = Navigate
+- `/` or `f`/`F` = Filter
+- `c`/`C` = Expand/collapse CPU cores
+- `n`/`N` = Show/hide network panel
 - `Enter` = Expand/Collapse command
 - `q` or `Esc` = Quit

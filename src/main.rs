@@ -7,11 +7,7 @@ use crossterm::{
     execute,
     terminal::{EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode},
 };
-use ratatui::{
-    Terminal,
-    backend::CrosstermBackend,
-    layout::{Constraint, Direction, Layout},
-};
+use ratatui::{Terminal, backend::CrosstermBackend};
 use signal_hook::{
     consts::signal::{SIGHUP, SIGTERM},
     flag,
@@ -137,8 +133,16 @@ fn handle_key(app: &mut App, key: KeyEvent) -> bool {
             false
         }
         KeyCode::Esc => true,
-        KeyCode::Char('/') => {
+        KeyCode::Char('/') | KeyCode::Char('f' | 'F') => {
             app.begin_filter();
+            false
+        }
+        KeyCode::Char('c' | 'C') => {
+            app.toggle_cpu_expanded();
+            false
+        }
+        KeyCode::Char('n' | 'N') => {
+            app.toggle_network_visible();
             false
         }
         KeyCode::Char('1') => {
@@ -181,14 +185,6 @@ fn handle_key(app: &mut App, key: KeyEvent) -> bool {
             app.move_selection(-(app.visible_rows.max(1) as isize));
             false
         }
-        KeyCode::Char('n') => {
-            app.move_to_match(true);
-            false
-        }
-        KeyCode::Char('N') => {
-            app.move_to_match(false);
-            false
-        }
         KeyCode::Char(' ') => {
             app.toggle_pause();
             false
@@ -210,39 +206,9 @@ fn run(
     app.refresh_processes();
 
     loop {
-        guard.terminal.draw(|f| {
-            let has_expanded = app.expanded_cmd.is_some();
-            let system_height = app.system_stats.panel_height();
-            let help_height = 6;
-            let constraints = if has_expanded {
-                vec![
-                    Constraint::Length(system_height),
-                    Constraint::Min(10),
-                    Constraint::Length(10),
-                    Constraint::Length(help_height),
-                ]
-            } else {
-                vec![
-                    Constraint::Length(system_height),
-                    Constraint::Min(10),
-                    Constraint::Length(help_height),
-                ]
-            };
-            let chunks = Layout::default()
-                .direction(Direction::Vertical)
-                .constraints(constraints)
-                .split(f.area());
-            let table_area = chunks[1];
-            app.visible_rows = ui::visible_rows_for_area(table_area);
-            ui::render_system_bars(f, &app, chunks[0]);
-            ui::render_process_table(f, &app, table_area);
-            if has_expanded {
-                ui::render_command_panel(f, &app, chunks[2]);
-                ui::render_help(f, &app, chunks[3]);
-            } else {
-                ui::render_help(f, &app, chunks[2]);
-            }
-        })?;
+        guard
+            .terminal
+            .draw(|frame| ui::render_dashboard(frame, &mut app))?;
 
         if termination_requested.load(Ordering::Relaxed) {
             break;
@@ -286,5 +252,19 @@ mod tests {
         assert!(
             parse_refresh_interval(["rustop".into(), "--interval".into(), "fast".into()]).is_err()
         );
+    }
+
+    #[test]
+    fn dashboard_shortcuts_toggle_panels_and_enter_filter_mode() {
+        let mut app = App::new();
+
+        assert!(!handle_key(&mut app, KeyEvent::from(KeyCode::Char('c'))));
+        assert!(app.cpu_expanded);
+
+        assert!(!handle_key(&mut app, KeyEvent::from(KeyCode::Char('N'))));
+        assert!(!app.network_visible);
+
+        assert!(!handle_key(&mut app, KeyEvent::from(KeyCode::Char('f'))));
+        assert!(app.filtering);
     }
 }

@@ -1,5 +1,5 @@
-use std::cmp::Ordering;
-use sysinfo::System;
+use std::{cmp::Ordering, collections::VecDeque, time::Instant};
+use sysinfo::{InterfaceOperationalState, IpNetwork, Networks, System};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SortKey {
@@ -25,6 +25,7 @@ pub struct ProcessInfo {
     pub cpu: f32,
     pub mem_mib: f64,
     pub cmd: Vec<String>,
+    pub state: String,
 }
 
 pub struct SystemStats {
@@ -33,6 +34,21 @@ pub struct SystemStats {
     pub mem_total: u64,
     pub swap_used: u64,
     pub swap_total: u64,
+    pub network_rx_history: VecDeque<u64>,
+    pub network_tx_history: VecDeque<u64>,
+    pub network_rx_rate: u64,
+    pub network_tx_rate: u64,
+    pub network_rx_total: u64,
+    pub network_tx_total: u64,
+    pub network_interface: String,
+    pub network_status: String,
+    pub network_ip: String,
+    pub network_ipv6: Vec<String>,
+    pub network_mac: String,
+    pub network_mtu: u64,
+    pub load_average: [f64; 3],
+    pub uptime: u64,
+    pub running_processes: usize,
 }
 
 impl SystemStats {
@@ -43,17 +59,102 @@ impl SystemStats {
             mem_total: 0,
             swap_used: 0,
             swap_total: 0,
+            network_rx_history: VecDeque::with_capacity(60),
+            network_tx_history: VecDeque::with_capacity(60),
+            network_rx_rate: 0,
+            network_tx_rate: 0,
+            network_rx_total: 0,
+            network_tx_total: 0,
+            network_interface: "detecting".to_string(),
+            network_status: "unknown".to_string(),
+            network_ip: "—".to_string(),
+            network_ipv6: Vec::new(),
+            network_mac: "—".to_string(),
+            network_mtu: 0,
+            load_average: [0.0; 3],
+            uptime: 0,
+            running_processes: 0,
         }
     }
 
-    /// Height needed to render the system bars panel (including borders).
-    pub fn panel_height(&self) -> u16 {
-        let cpu_rows = self.cpus.len().div_ceil(2); // two columns
-        let mem_rows = 1;
-        let swap_rows = if self.swap_total > 0 { 1 } else { 0 };
-        let borders = 2;
-        (cpu_rows + mem_rows + swap_rows + borders) as u16
+    pub fn record_network_sample(&mut self, received: u64, transmitted: u64) {
+        const HISTORY_LENGTH: usize = 60;
+        if self.network_rx_history.len() == HISTORY_LENGTH {
+            self.network_rx_history.pop_front();
+            self.network_tx_history.pop_front();
+        }
+        self.network_rx_history.push_back(received);
+        self.network_tx_history.push_back(transmitted);
+        self.network_rx_rate = received;
+        self.network_tx_rate = transmitted;
     }
+
+    pub fn set_network_interface(
+        &mut self,
+        name: &str,
+        status: &str,
+        ip: &str,
+        ipv6: &[String],
+        mac: &str,
+        mtu: u64,
+    ) {
+        if self.network_interface != name {
+            self.network_rx_history.clear();
+            self.network_tx_history.clear();
+            self.network_rx_rate = 0;
+            self.network_tx_rate = 0;
+            self.network_rx_total = 0;
+            self.network_tx_total = 0;
+        }
+        name.clone_into(&mut self.network_interface);
+        status.clone_into(&mut self.network_status);
+        ip.clone_into(&mut self.network_ip);
+        self.network_ipv6.clear();
+        self.network_ipv6.extend_from_slice(ipv6);
+        mac.clone_into(&mut self.network_mac);
+        self.network_mtu = mtu;
+    }
+}
+
+fn select_network_interface<'a>(
+    interfaces: &'a [(&'a str, u64, u64, bool, bool, bool)],
+) -> Option<&'a str> {
+    let has_non_loopback = interfaces.iter().any(|interface| !interface.3);
+    interfaces
+        .iter()
+        .filter(|interface| !has_non_loopback || !interface.3)
+        .max_by(|left, right| {
+            let left_total = left.1.saturating_add(left.2);
+            let right_total = right.1.saturating_add(right.2);
+            left_total
+                .cmp(&right_total)
+                .then_with(|| left.5.cmp(&right.5))
+                .then_with(|| left.4.cmp(&right.4))
+                .then_with(|| right.0.cmp(left.0))
+        })
+        .map(|interface| interface.0)
+}
+
+fn has_preferred_network_address(addresses: &[IpNetwork]) -> bool {
+    addresses
+        .iter()
+        .any(|network| network.addr.is_ipv4() && !network.addr.is_loopback())
+}
+
+fn interface_addresses(addresses: &[IpNetwork]) -> (String, Vec<String>) {
+    let ipv4 = addresses
+        .iter()
+        .find(|network| network.addr.is_ipv4() && !network.addr.is_loopback())
+        .or_else(|| addresses.iter().find(|network| network.addr.is_ipv4()))
+        .map(ToString::to_string)
+        .unwrap_or_else(|| "—".to_string());
+    let mut ipv6: Vec<_> = addresses
+        .iter()
+        .filter(|network| network.addr.is_ipv6())
+        .map(ToString::to_string)
+        .collect();
+    ipv6.sort();
+    (ipv4, ipv6)
 }
 
 /// Replace characters that can alter terminal layout or visual reading order.
@@ -79,6 +180,8 @@ pub fn sanitize(s: &str) -> String {
 
 pub struct App {
     system: System,
+    networks: Networks,
+    last_network_refresh: Instant,
     pub processes: Vec<ProcessInfo>,
     pub system_stats: SystemStats,
     pub sort_key: SortKey,
@@ -90,6 +193,8 @@ pub struct App {
     pub filter: String,
     pub filtering: bool,
     pub paused: bool,
+    pub cpu_expanded: bool,
+    pub network_visible: bool,
 }
 
 impl App {
@@ -98,6 +203,8 @@ impl App {
         system.refresh_all();
         Self {
             system,
+            networks: Networks::new_with_refreshed_list(),
+            last_network_refresh: Instant::now(),
             processes: Vec::new(),
             system_stats: SystemStats::new(),
             sort_key: SortKey::Cpu,
@@ -109,11 +216,14 @@ impl App {
             filter: String::new(),
             filtering: false,
             paused: false,
+            cpu_expanded: false,
+            network_visible: true,
         }
     }
 
     pub fn refresh_processes(&mut self) {
         self.system.refresh_all();
+        self.networks.refresh(true);
 
         // Update system-level stats
         self.system_stats.cpus.clear();
@@ -124,6 +234,57 @@ impl App {
         self.system_stats.mem_total = self.system.total_memory();
         self.system_stats.swap_used = self.system.used_swap();
         self.system_stats.swap_total = self.system.total_swap();
+        let load = System::load_average();
+        self.system_stats.load_average = [load.one, load.five, load.fifteen];
+        self.system_stats.uptime = System::uptime();
+
+        let elapsed = self.last_network_refresh.elapsed().as_secs_f64().max(0.001);
+        self.last_network_refresh = Instant::now();
+        let candidates: Vec<_> = self
+            .networks
+            .iter()
+            .map(|(name, network)| {
+                let addresses = network.ip_networks();
+                let loopback = name.starts_with("lo")
+                    || (!addresses.is_empty()
+                        && addresses.iter().all(|network| network.addr.is_loopback()));
+                let is_up = network.operational_state() == InterfaceOperationalState::Up;
+                let has_address = has_preferred_network_address(addresses);
+                (
+                    name.as_str(),
+                    network.total_received(),
+                    network.total_transmitted(),
+                    loopback,
+                    is_up,
+                    has_address,
+                )
+            })
+            .collect();
+        if let Some(name) = select_network_interface(&candidates)
+            && let Some(network) = self.networks.get(name)
+        {
+            let (ip, ipv6) = interface_addresses(network.ip_networks());
+            let mac = network.mac_address();
+            let mac = if mac.is_unspecified() {
+                "—".to_string()
+            } else {
+                mac.to_string()
+            };
+            self.system_stats.set_network_interface(
+                name,
+                &network.operational_state().to_string(),
+                &ip,
+                &ipv6,
+                &mac,
+                network.mtu(),
+            );
+            self.system_stats.network_rx_total = network.total_received();
+            self.system_stats.network_tx_total = network.total_transmitted();
+            self.system_stats.record_network_sample(
+                (network.received() as f64 / elapsed) as u64,
+                (network.transmitted() as f64 / elapsed) as u64,
+            );
+        }
 
         self.processes.clear();
         self.processes
@@ -143,8 +304,15 @@ impl App {
                     cpu: process.cpu_usage(),
                     mem_mib,
                     cmd,
+                    state: format!("{:?}", process.status()),
                 }
             }));
+
+        self.system_stats.running_processes = self
+            .processes
+            .iter()
+            .filter(|process| process.state == "Run")
+            .count();
 
         self.sort_processes();
 
@@ -253,28 +421,6 @@ impl App {
         }
     }
 
-    pub fn move_to_match(&mut self, forward: bool) {
-        let filtered_pids: Vec<u32> = self
-            .filtered_processes()
-            .map(|process| process.pid)
-            .collect();
-        if filtered_pids.is_empty() {
-            return;
-        }
-        let index = self
-            .selected_pid
-            .and_then(|pid| filtered_pids.iter().position(|&candidate| candidate == pid))
-            .map(|index| {
-                if forward {
-                    (index + 1) % filtered_pids.len()
-                } else {
-                    (index + filtered_pids.len() - 1) % filtered_pids.len()
-                }
-            })
-            .unwrap_or(0);
-        self.select_filtered_index(index, &filtered_pids);
-    }
-
     fn select_filtered_index(&mut self, new_idx: usize, filtered_pids: &[u32]) {
         self.selected_pid = Some(filtered_pids[new_idx]);
 
@@ -321,6 +467,14 @@ impl App {
     pub fn toggle_pause(&mut self) {
         self.paused = !self.paused;
     }
+
+    pub fn toggle_cpu_expanded(&mut self) {
+        self.cpu_expanded = !self.cpu_expanded;
+    }
+
+    pub fn toggle_network_visible(&mut self) {
+        self.network_visible = !self.network_visible;
+    }
 }
 
 #[cfg(test)]
@@ -335,12 +489,15 @@ mod tests {
             cpu,
             mem_mib,
             cmd: vec![format!("/usr/bin/{}", name)],
+            state: "Run".to_string(),
         }
     }
 
     fn make_app_with(procs: Vec<ProcessInfo>) -> App {
         App {
             system: System::new(),
+            networks: Networks::new(),
+            last_network_refresh: Instant::now(),
             processes: procs,
             system_stats: SystemStats::new(),
             sort_key: SortKey::Cpu,
@@ -352,6 +509,8 @@ mod tests {
             filter: String::new(),
             filtering: false,
             paused: false,
+            cpu_expanded: false,
+            network_visible: true,
         }
     }
 
@@ -615,21 +774,6 @@ mod tests {
     }
 
     #[test]
-    fn match_navigation_wraps_in_both_directions() {
-        let mut app = make_app_with(vec![
-            make_process(1, "alpha", 1.0, 1.0),
-            make_process(2, "alpine", 1.0, 1.0),
-        ]);
-        app.filter = "al".to_string();
-        app.selected_pid = Some(2);
-
-        app.move_to_match(true);
-        assert_eq!(app.selected_pid, Some(1));
-        app.move_to_match(false);
-        assert_eq!(app.selected_pid, Some(2));
-    }
-
-    #[test]
     fn edge_navigation_selects_first_and_last_filtered_process() {
         let mut app = make_app_with(vec![
             make_process(1, "alpha", 1.0, 1.0),
@@ -652,6 +796,139 @@ mod tests {
         assert!(app.paused);
         app.toggle_pause();
         assert!(!app.paused);
+    }
+
+    #[test]
+    fn dashboard_panels_default_to_summary_cpu_and_visible_network() {
+        let app = make_app_with(vec![]);
+
+        assert!(!app.cpu_expanded);
+        assert!(app.network_visible);
+    }
+
+    #[test]
+    fn dashboard_panel_toggles_are_independent() {
+        let mut app = make_app_with(vec![]);
+
+        app.toggle_cpu_expanded();
+        assert!(app.cpu_expanded);
+        assert!(app.network_visible);
+
+        app.toggle_network_visible();
+        assert!(app.cpu_expanded);
+        assert!(!app.network_visible);
+    }
+
+    #[test]
+    fn network_history_keeps_the_most_recent_sixty_samples() {
+        let mut stats = SystemStats::new();
+
+        for sample in 0..65 {
+            stats.record_network_sample(sample, sample * 2);
+        }
+
+        assert_eq!(stats.network_rx_history.len(), 60);
+        assert_eq!(stats.network_tx_history.len(), 60);
+        assert_eq!(stats.network_rx_history.front(), Some(&5));
+        assert_eq!(stats.network_rx_history.back(), Some(&64));
+        assert_eq!(stats.network_tx_history.back(), Some(&128));
+    }
+
+    #[test]
+    fn network_sample_updates_current_rates() {
+        let mut stats = SystemStats::new();
+
+        stats.record_network_sample(1_024, 2_048);
+
+        assert_eq!(stats.network_rx_rate, 1_024);
+        assert_eq!(stats.network_tx_rate, 2_048);
+    }
+
+    #[test]
+    fn busiest_non_loopback_interface_wins_even_when_loopback_is_busier() {
+        let interfaces = [
+            ("lo0", 50_000, 50_000, true, true, true),
+            ("en0", 2_000, 1_000, false, true, true),
+            ("en1", 4_000, 3_000, false, false, false),
+        ];
+
+        assert_eq!(select_network_interface(&interfaces), Some("en1"));
+    }
+
+    #[test]
+    fn network_interface_fallback_is_alphabetical_when_traffic_is_tied() {
+        let interfaces = [
+            ("utun1", 0, 0, false, true, true),
+            ("en1", 0, 0, false, true, true),
+            ("en0", 0, 0, false, true, true),
+        ];
+
+        assert_eq!(select_network_interface(&interfaces), Some("en0"));
+    }
+
+    #[test]
+    fn zero_traffic_fallback_prefers_an_up_addressed_interface() {
+        let interfaces = [
+            ("anpi0", 0, 0, false, true, false),
+            ("en0", 0, 0, false, true, true),
+            ("en1", 0, 0, false, false, true),
+        ];
+
+        assert_eq!(select_network_interface(&interfaces), Some("en0"));
+    }
+
+    #[test]
+    fn preferred_interface_address_requires_non_loopback_ipv4() {
+        let link_local = ["fe80::1/64".parse().unwrap()];
+        let ipv4 = ["192.0.2.10/24".parse().unwrap()];
+
+        assert!(!has_preferred_network_address(&link_local));
+        assert!(has_preferred_network_address(&ipv4));
+    }
+
+    #[test]
+    fn interface_addresses_keep_ipv4_primary_and_include_all_ipv6() {
+        let addresses = [
+            "fe80::1/64".parse().unwrap(),
+            "2001:db8::10/64".parse().unwrap(),
+            "192.0.2.10/24".parse().unwrap(),
+        ];
+
+        let (ipv4, ipv6) = interface_addresses(&addresses);
+
+        assert_eq!(ipv4, "192.0.2.10/24");
+        assert_eq!(ipv6, vec!["2001:db8::10/64", "fe80::1/64"]);
+    }
+
+    #[test]
+    fn switching_monitored_interface_starts_a_fresh_history() {
+        let mut stats = SystemStats::new();
+        stats.set_network_interface("en0", "up", "192.0.2.10/24", &[], "00:11:22:33:44:55", 1500);
+        stats.record_network_sample(10, 20);
+
+        stats.set_network_interface(
+            "en1",
+            "down",
+            "198.51.100.4/24",
+            &[],
+            "66:77:88:99:aa:bb",
+            9000,
+        );
+        stats.record_network_sample(30, 40);
+
+        assert_eq!(stats.network_interface, "en1");
+        assert_eq!(stats.network_status, "down");
+        assert_eq!(stats.network_ip, "198.51.100.4/24");
+        assert_eq!(stats.network_mac, "66:77:88:99:aa:bb");
+        assert_eq!(stats.network_mtu, 9000);
+        assert_eq!(
+            stats.network_rx_history.iter().copied().collect::<Vec<_>>(),
+            vec![30]
+        );
+        assert_eq!(
+            stats.network_tx_history.iter().copied().collect::<Vec<_>>(),
+            vec![40]
+        );
     }
 
     // ── sort_processes ────────────────────────────────────────
