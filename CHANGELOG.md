@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.4](https://github.com/wingnut128/rustop/compare/v0.2.3...v0.2.4) - 2026-09-06
+
+### Other
+
+- Merge pull request #20 from wingnut128/dependabot/github_actions/github/codeql-action/upload-sarif-4.37.4
+
 ## [0.2.3](https://github.com/wingnut128/rustop/compare/v0.2.2...v0.2.3) - 2026-09-06
 
 ### Added
