@@ -1,11 +1,13 @@
 # rustop
 
-An htop-like process viewer for the terminal, written in Rust using [ratatui](https://ratatui.rs/) and [sysinfo](https://crates.io/crates/sysinfo).
+A btop-inspired system and process dashboard for the terminal, written in Rust using [ratatui](https://ratatui.rs/) and [sysinfo](https://crates.io/crates/sysinfo).
 
 ## Features
 
-- CPU, memory, swap, and load meters at a glance
+- CPU, memory, swap, load, uptime, and network meters at a glance
+- Expandable per-core CPU burn-rate meters and RX/TX history graphs
 - Sortable process table (CPU, memory, PID, name) with ascending/descending toggle
+- Responsive process details including state and command preview
 - Keyboard navigation with a selectable row
 - Expandable command-line panel for the highlighted process
 - Graceful terminal restoration on exit or panic
@@ -69,8 +71,9 @@ to refresh twice per second. The interval must be a positive number of milliseco
 | `g` / Home     | Select first process         |
 | `G` / End      | Select last process          |
 | PageUp/PageDown| Move one table page          |
-| `/`            | Filter by process name       |
-| `n` / `N`      | Next/previous filter match   |
+| `/` or `f`/`F` | Filter by process name       |
+| `c` / `C`      | Expand/collapse CPU cores    |
+| `n` / `N`      | Show/hide the network panel  |
 | `Space`        | Pause/resume collection      |
 | `Enter`        | Expand/collapse command line |
 | `Esc`          | Clear filter, or quit        |
